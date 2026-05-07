@@ -1,5 +1,5 @@
 proc build_mysqltpcc {} {
-    global maxvuser suppo ntimes threadscreated _ED mysql_ssl_options tpcc_obcompat ob_tenant_name
+    global maxvuser suppo ntimes threadscreated _ED mysql_ssl_options
     upvar #0 dbdict dbdict
 
     if {[dict exists $dbdict mysql library ]} {
@@ -444,20 +444,16 @@ proc CreateStoredProcs { mysql_handler } {
     return
 }
 
-proc ConnectToMySQL { host port socket ssl_options user password is_oceanbase ob_tenant_name } {
+proc ConnectToMySQL { host port socket ssl_options user password } {
     global mysqlstatus
     #ssl_options is variable length so build a connectstring
-    if { ($is_oceanbase == "false" ) && ([ chk_socket $host $socket ] eq "TRUE")} {
-        set use_socket "true"
-        append connectstring " -socket $socket"
+    if { [ chk_socket $host $socket ] eq "TRUE" } {
+    	set use_socket "true"
+    	append connectstring " -socket $socket"
     } else {
         set use_socket "false"
         append connectstring " -host $host -port $port"
-        #if is_oceanbase is false and chk_socket is false we don't want to change the username
-        if { $is_oceanbase == "true" } {
-            set user "$user@$ob_tenant_name"
-        }
-    }
+	}
     foreach key [ dict keys $ssl_options ] {
         append connectstring " $key [ dict get $ssl_options $key ] "
     }
@@ -487,87 +483,10 @@ proc ConnectToMySQL { host port socket ssl_options user password is_oceanbase ob
     }
 }
 
-proc chk_socket { host socket } {
-    if { ![string match windows $::tcl_platform(platform)] && ($host eq "127.0.0.1" || [ string tolower $host ] eq "localhost") && [ string tolower $socket ] != "null" } {
-        return "TRUE"
-    } else {
-        return "FALSE"
-    }
-}
-
-proc PrepareOceanbase { host port socket ssl_options user password ob_tenant_name} {
-    puts "Prepare Oceanbase"
-    global mysqlstatus
-    #ssl_options is variable length so build a connectstring
-    set use_socket "false"
-    append connectstring " -host $host -port $port"
-
-    foreach key [ dict keys $ssl_options ] {
-        append connectstring " $key [ dict get $ssl_options $key ] "
-    }
-
-    append connectstring " -user $user@sys -password $password"
-    set login_command "mysqlconnect [ dict get $connectstring ]"
-
-    puts "login_command: $login_command"
-    #eval the login command
-    if [catch {set ob_handler [eval $login_command]}] {
-        if $use_socket {
-            puts "the local socket connection to $socket could not be established"
-        } else {
-            puts "the tcp connection to $host:$port could not be established"
-        }
-        set connected "false"
-    } else {
-        set connected "true"
-    }
-    if {$connected} {
-        mysql::autocommit $ob_handler 0
-        catch {set ssl_status [ mysql::sel $ob_handler "show session status like 'ssl_cipher'" -list ]}
-        if { [ info exists ssl_status ] } {
-        puts [ join $ssl_status ]
-        }
-        set sql(1) "alter system set enable_sql_extension=True tenant=$ob_tenant_name;"
-        set sql(2) "alter system set enable_perf_event=True;"
-        for { set i 1 } { $i <= 2 } { incr i } {
-            puts "$sql($i)"
-            mysqlexec $ob_handler $sql($i)
-        }
-        puts "Oceanbase system parameters is ready"
-        return $ob_handler
-    } else {
-        error $mysqlstatus(message)
-        return
-    }
-}
-
-proc GatherStatisticsOB { mysql_handler partition_num } {
-    puts "GATHERING SCHEMA STATISTICS FOR OCEANBASE"
-    set sql(1) "set _force_parallel_query_dop = $partition_num;"
-    set sql(2) "set GLOBAL ob_query_timeout = 20000000000;"
-
-    for { set i 1 } { $i <= 2 } { incr i } {
-        puts "$sql($i)"
-        mysqlexec $mysql_handler $sql($i)
-    }
-
-    # Analyze partitioned tables
-    set tables {customer district history item new_order orders order_line stock warehouse}
-    foreach table $tables {
-        puts "Analyzing table $table..."
-        mysqlexec $mysql_handler "analyze table $table compute statistics for all columns;"
-    }
-    return
-}
-
-proc GatherStatistics { mysql_handler is_oceanbase partition_num } {
+proc GatherStatistics { mysql_handler } {
     puts "GATHERING SCHEMA STATISTICS"
-    if { $is_oceanbase == "true" } {
-        GatherStatisticsOB $mysql_handler $partition_num
-    } else {
-        set sql(1) "analyze table customer, district, history, item, new_order, orders, order_line, stock, warehouse"
-        mysqlexec $mysql_handler $sql(1)
-    }
+    set sql(1) "analyze table customer, district, history, item, new_order, orders, order_line, stock, warehouse"
+    mysqlexec $mysql_handler $sql(1)
     return
 }
 
@@ -772,145 +691,6 @@ ENGINE = $mysql_storage_engine"
 PRIMARY KEY (`w_id`)
 )
 ENGINE = $mysql_storage_engine"
-    for { set i 1 } { $i <= 9 } { incr i } {
-        mysqlexec $mysql_handler $sql($i)
-    }
-    return
-}
-
-proc CreateOBTables { mysql_handler partitions_num } {
-    puts "CREATING OceanBase TPCC TABLES"
-    set sql(1) "CREATE TABLE IF NOT EXISTS `customer` (
-  `c_id` INT(5) NOT NULL,
-  `c_d_id` INT(2) NOT NULL,
-  `c_w_id` INT(6) NOT NULL,
-  `c_first` VARCHAR(16) BINARY NULL,
-  `c_middle` CHAR(2) BINARY NULL,
-  `c_last` VARCHAR(16) BINARY NULL,
-  `c_street_1` VARCHAR(20) BINARY NULL,
-  `c_street_2` VARCHAR(20) BINARY NULL,
-  `c_city` VARCHAR(20) BINARY NULL,
-  `c_state` CHAR(2) BINARY NULL,
-  `c_zip` CHAR(9) BINARY NULL,
-  `c_phone` CHAR(16) BINARY NULL,
-  `c_since` DATETIME NULL,
-  `c_credit` CHAR(2) BINARY NULL,
-  `c_credit_lim` DECIMAL(12, 2) NULL,
-  `c_discount` DECIMAL(4, 4) NULL,
-  `c_balance` DECIMAL(12, 2) NULL,
-  `c_ytd_payment` DECIMAL(12, 2) NULL,
-  `c_payment_cnt` INT(8) NULL,
-  `c_delivery_cnt` INT(8) NULL,
-  `c_data` VARCHAR(500) BINARY NULL,
-PRIMARY KEY (`c_w_id`,`c_d_id`,`c_id`),
-KEY c_w_id (`c_w_id`,`c_d_id`,`c_last`(16),`c_first`(16))
-) partition by key(c_w_id) partitions $partitions_num;"
-
-    set sql(2) "CREATE TABLE IF NOT EXISTS `district` (
-  `d_id` INT(2) NOT NULL,
-  `d_w_id` INT(6) NOT NULL,
-  `d_ytd` DECIMAL(12, 2) NULL,
-  `d_tax` DECIMAL(4, 4) NULL,
-  `d_next_o_id` INT NULL,
-  `d_name` VARCHAR(10) BINARY NULL,
-  `d_street_1` VARCHAR(20) BINARY NULL,
-  `d_street_2` VARCHAR(20) BINARY NULL,
-  `d_city` VARCHAR(20) BINARY NULL,
-  `d_state` CHAR(2) BINARY NULL,
-  `d_zip` CHAR(9) BINARY NULL,
-PRIMARY KEY (`d_w_id`,`d_id`)
-) partition by key(d_w_id) partitions $partitions_num;"
-
-    set sql(3) "CREATE TABLE IF NOT EXISTS `history` (
-  `h_c_id` INT NULL,
-  `h_c_d_id` INT NULL,
-  `h_c_w_id` INT NULL,
-  `h_d_id` INT NULL,
-  `h_w_id` INT NULL,
-  `h_date` DATETIME NULL,
-  `h_amount` DECIMAL(6, 2) NULL,
-  `h_data` VARCHAR(24) BINARY NULL,
-  `id` INT NOT NULL AUTO_INCREMENT,
-PRIMARY KEY (`id`)
-) partition by key(h_w_id) partitions $partitions_num;"
-
-    set sql(4) "CREATE TABLE IF NOT EXISTS `item` (
-  `i_id` INT(6) NOT NULL,
-  `i_im_id` INT NULL,
-  `i_name` VARCHAR(24) BINARY NULL,
-  `i_price` DECIMAL(5, 2) NULL,
-  `i_data` VARCHAR(50) BINARY NULL,
-PRIMARY KEY (`i_id`)
-);"
-
-    set sql(5) "CREATE TABLE IF NOT EXISTS `new_order` (
-  `no_w_id` INT NOT NULL,
-  `no_d_id` INT NOT NULL,
-  `no_o_id` INT NOT NULL,
-PRIMARY KEY (`no_w_id`, `no_d_id`, `no_o_id`)
-) partition by key(no_w_id) partitions $partitions_num;"
-
-    set sql(6) "CREATE TABLE IF NOT EXISTS `orders` (
-  `o_id` INT NOT NULL,
-  `o_w_id` INT NOT NULL,
-  `o_d_id` INT NOT NULL,
-  `o_c_id` INT NULL,
-  `o_carrier_id` INT NULL,
-  `o_ol_cnt` INT NULL,
-  `o_all_local` INT NULL,
-  `o_entry_d` DATETIME NULL,
-PRIMARY KEY (`o_w_id`,`o_d_id`,`o_id`),
-KEY o_w_id (`o_w_id`,`o_d_id`,`o_c_id`,`o_id`)
-) partition by key(o_w_id) partitions $partitions_num;"
-
-    set sql(7) "CREATE TABLE IF NOT EXISTS `order_line` (
-  `ol_w_id` INT NOT NULL,
-  `ol_d_id` INT NOT NULL,
-  `ol_o_id` INT NOT NULL,
-  `ol_number` INT NOT NULL,
-  `ol_i_id` INT NULL,
-  `ol_delivery_d` DATETIME NULL,
-  `ol_amount` INT NULL,
-  `ol_supply_w_id` INT NULL,
-  `ol_quantity` INT NULL,
-  `ol_dist_info` CHAR(24) BINARY NULL,
-PRIMARY KEY (`ol_w_id`,`ol_d_id`,`ol_o_id`,`ol_number`)
-) partition by key(ol_w_id) partitions $partitions_num;"
-
-    set sql(8) "CREATE TABLE IF NOT EXISTS `stock` (
-  `s_i_id` INT(6) NOT NULL,
-  `s_w_id` INT(6) NOT NULL,
-  `s_quantity` INT(6) NULL,
-  `s_dist_01` CHAR(24) BINARY NULL,
-  `s_dist_02` CHAR(24) BINARY NULL,
-  `s_dist_03` CHAR(24) BINARY NULL,
-  `s_dist_04` CHAR(24) BINARY NULL,
-  `s_dist_05` CHAR(24) BINARY NULL,
-  `s_dist_06` CHAR(24) BINARY NULL,
-  `s_dist_07` CHAR(24) BINARY NULL,
-  `s_dist_08` CHAR(24) BINARY NULL,
-  `s_dist_09` CHAR(24) BINARY NULL,
-  `s_dist_10` CHAR(24) BINARY NULL,
-  `s_ytd` BIGINT(10) NULL,
-  `s_order_cnt` INT(6) NULL,
-  `s_remote_cnt` INT(6) NULL,
-  `s_data` VARCHAR(50) BINARY NULL,
-PRIMARY KEY (`s_w_id`,`s_i_id`)
-) partition by key(s_w_id) partitions $partitions_num;"
-
-    set sql(9) "CREATE TABLE IF NOT EXISTS `warehouse` (
-  `w_id` INT(6) NOT NULL,
-  `w_ytd` DECIMAL(12, 2) NULL,
-  `w_tax` DECIMAL(4, 4) NULL,
-  `w_name` VARCHAR(10) BINARY NULL,
-  `w_street_1` VARCHAR(20) BINARY NULL,
-  `w_street_2` VARCHAR(20) BINARY NULL,
-  `w_city` VARCHAR(20) BINARY NULL,
-  `w_state` CHAR(2) BINARY NULL,
-  `w_zip` CHAR(9) BINARY NULL,
-PRIMARY KEY (`w_id`)
-);"
-
     for { set i 1 } { $i <= 9 } { incr i } {
         mysqlexec $mysql_handler $sql($i)
     }
@@ -1204,7 +984,7 @@ proc chk_socket { host socket } {
     }
 }
 
-proc do_tpcc { host port socket ssl_options count_ware user password db mysql_storage_engine partition history_pk num_vu is_oceanbase ob_tenant_name } {
+proc do_tpcc { host port socket ssl_options count_ware user password db mysql_storage_engine partition history_pk num_vu } {
     global mysqlstatus
     set MAXITEMS 100000
     set CUST_PER_DIST 3000
@@ -1236,13 +1016,7 @@ proc do_tpcc { host port socket ssl_options count_ware user password db mysql_st
     }
     if { $threaded eq "SINGLE-THREADED" ||  $threaded eq "MULTI-THREADED" && $myposition eq 1 } {
         puts "CREATING [ string toupper $db ] SCHEMA"
-
-        # Prepare OceanBase if enabled
-        if { $is_oceanbase == "true" } {
-            PrepareOceanbase $host $port $socket $ssl_options $user $password $ob_tenant_name
-        }
-
-        set mysql_handler [ ConnectToMySQL $host $port $socket $ssl_options $user $password $is_oceanbase $ob_tenant_name ]
+        set mysql_handler [ ConnectToMySQL $host $port $socket $ssl_options $user $password ]
         set db_created [ CreateDatabase $mysql_handler $db ]
         if { !$db_created } {
             tsv::set application abort 1
@@ -1259,13 +1033,7 @@ proc do_tpcc { host port socket ssl_options count_ware user password db mysql_st
         } else {
             set num_part 0
         }
-
-        # Use OceanBase tables if enabled
-        if { $is_oceanbase == "true" } {
-            CreateOBTables $mysql_handler $num_part
-        } else {
-            CreateTables $mysql_handler $mysql_storage_engine $num_part $history_pk
-        }
+        CreateTables $mysql_handler $mysql_storage_engine $num_part $history_pk
         if { $threaded eq "MULTI-THREADED" } {
             tsv::set application load "READY"
             LoadItems $mysql_handler $MAXITEMS
@@ -1307,7 +1075,7 @@ proc do_tpcc { host port socket ssl_options count_ware user password db mysql_st
                 }
                 after 5000
             }
-            set mysql_handler [ ConnectToMySQL $host $port $socket $ssl_options $user $password $is_oceanbase $ob_tenant_name ]
+            set mysql_handler [ ConnectToMySQL $host $port $socket $ssl_options $user $password ]
             mysqluse $mysql_handler $db
             set remb [ lassign [ findchunk $num_vu $count_ware $myposition ] chunk mystart myend ]
             puts "Loading $chunk Warehouses start:$mystart end:$myend"
@@ -1328,14 +1096,14 @@ proc do_tpcc { host port socket ssl_options count_ware user password db mysql_st
     }
     if { $threaded eq "SINGLE-THREADED" || $threaded eq "MULTI-THREADED" && $myposition eq 1 } {
         CreateStoredProcs $mysql_handler
-        GatherStatistics $mysql_handler $is_oceanbase $num_part
+        GatherStatistics $mysql_handler
         puts "[ string toupper $db ] SCHEMA COMPLETE"
         mysqlclose $mysql_handler
         return
     }
 }
 }
-        .ed_mainFrame.mainwin.textFrame.left.text fastinsert end "do_tpcc $mysql_host $mysql_port $mysql_socket {$mysql_ssl_options} $mysql_count_ware $mysql_user [ quotemeta $mysql_pass ] $mysql_dbase $mysql_storage_engine $mysql_partition $mysql_history_pk $mysql_num_vu \$tpcc_obcompat \$ob_tenant_name"
+        .ed_mainFrame.mainwin.textFrame.left.text fastinsert end "do_tpcc $mysql_host $mysql_port $mysql_socket {$mysql_ssl_options} $mysql_count_ware $mysql_user [ quotemeta $mysql_pass ] $mysql_dbase $mysql_storage_engine $mysql_partition $mysql_history_pk $mysql_num_vu"
     } else { return }
 }
 
