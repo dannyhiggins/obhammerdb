@@ -92,6 +92,9 @@ proc countmysqlopts { bm } {
     if {![info exists mysql_ob_tenant_name]} {
         set mysql_ob_tenant_name "test"
     }
+    if {![info exists mysql_ob_partition_num]} {
+        set mysql_ob_partition_num "1"
+    }
     if { $bm eq "TPC-C" } {
         if {![string match windows $::tcl_platform(platform)]} {
             set platform "lin"
@@ -422,7 +425,7 @@ proc configmysqltpcc {option} {
     upvar #0 configmysql configmysql
     #set variables to values in dict
     setlocaltpccvars $configmysql
-    set tpccfields [ dict create tpcc {mysql_user {.tpc.c1.e3 get} mysql_pass {.tpc.c1.e4 get} mysql_dbase {.tpc.c1.e5 get} mysql_storage_engine {.tpc.f1.e6 get} mysql_total_iterations {.tpc.f1.e14 get} mysql_rampup {.tpc.f1.e17 get} mysql_duration {.tpc.f1.e18 get} mysql_async_client {.tpc.f1.e22 get} mysql_async_delay {.tpc.f1.e23 get} mysql_count_ware $mysql_count_ware mysql_num_vu $mysql_num_vu mysql_partition $mysql_partition mysql_driver $mysql_driver mysql_raiseerror $mysql_raiseerror mysql_keyandthink $mysql_keyandthink mysql_allwarehouse $mysql_allwarehouse mysql_timeprofile $mysql_timeprofile mysql_async_scale $mysql_async_scale mysql_async_verbose $mysql_async_verbose mysql_prepared $mysql_prepared mysql_no_stored_procs $mysql_no_stored_procs mysql_connect_pool $mysql_connect_pool mysql_history_pk $mysql_history_pk mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name} ]
+    set tpccfields [ dict create tpcc {mysql_user {.tpc.c1.e3 get} mysql_pass {.tpc.c1.e4 get} mysql_dbase {.tpc.c1.e5 get} mysql_storage_engine {.tpc.f1.e6 get} mysql_total_iterations {.tpc.f1.e14 get} mysql_rampup {.tpc.f1.e17 get} mysql_duration {.tpc.f1.e18 get} mysql_async_client {.tpc.f1.e22 get} mysql_async_delay {.tpc.f1.e23 get} mysql_count_ware $mysql_count_ware mysql_num_vu $mysql_num_vu mysql_partition $mysql_partition mysql_driver $mysql_driver mysql_raiseerror $mysql_raiseerror mysql_keyandthink $mysql_keyandthink mysql_allwarehouse $mysql_allwarehouse mysql_timeprofile $mysql_timeprofile mysql_async_scale $mysql_async_scale mysql_async_verbose $mysql_async_verbose mysql_prepared $mysql_prepared mysql_no_stored_procs $mysql_no_stored_procs mysql_connect_pool $mysql_connect_pool mysql_history_pk $mysql_history_pk mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name mysql_ob_partition_num $mysql_ob_partition_num} ]
     if {![string match windows $::tcl_platform(platform)]} {
         set platform "lin"
         set mysqlconn [ dict create connection {mysql_host {.tpc.c1.e1 get} mysql_port {.tpc.c1.e2 get} mysql_socket {.tpc.c1.e2a get} mysql_ssl_ca {.tpc.c1.e2d get} mysql_ssl_cert {.tpc.c1.e2e get} mysql_ssl_key {.tpc.c1.e2f get} mysql_ssl_cipher {.tpc.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath mysql_oceanbase_port $mysql_oceanbase_port} ]
@@ -685,11 +688,21 @@ proc configmysqltpcc {option} {
         if {$mysql_tpcc_obcompat == "false" } {
             $Name configure -state disabled
         }
+        set Prompt $Parent.f1.p12b
+        ttk::label $Prompt -text "Oceanbase Partition Number :"
+        set Name $Parent.f1.e12b
+        ttk::entry $Name -width 30 -textvariable mysql_ob_partition_num
+        grid $Prompt -column 0 -row 23 -sticky e
+        grid $Name -column 1 -row 23 -sticky ew
+        if {$mysql_tpcc_obcompat == "false" } {
+            $Name configure -state disabled
+        }
         # OceanBase checkbox handler for port switching
         bind .tpc.f1.e11a <Button> {
             if { $mysql_tpcc_obcompat eq "true" } {
                 set mysql_port $mysql_oceanbase_port
                 .tpc.f1.e12 configure -state normal
+                .tpc.f1.e12b configure -state normal
                 # Disable SSL for OceanBase
                 .tpc.c1.e2b configure -state disabled
                 .tpc.c1.e2ba configure -state disabled
@@ -702,6 +715,7 @@ proc configmysqltpcc {option} {
             } else {
                 set mysql_port $default_mysql_port
                 .tpc.f1.e12 configure -state disabled
+                .tpc.f1.e12b configure -state disabled
                 # Enable SSL options
                 .tpc.c1.e2b configure -state normal
             }
@@ -711,7 +725,7 @@ proc configmysqltpcc {option} {
         if { $option eq "all" } {
             set Prompt $Parent.f1.h3
             ttk::label $Prompt -image [ create_image driveroptlo icons ]
-            grid $Prompt -column 0 -row 23 -sticky e
+            grid $Prompt -column 0 -row 24 -sticky e
             set Prompt $Parent.f1.h4
             ttk::label $Prompt -text "Driver Options"
             grid $Prompt -column 1 -row 23 -sticky w
