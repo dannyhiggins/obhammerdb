@@ -50,7 +50,7 @@ proc tcount_mysql {bm interval masterthread} {
             }
         }
 
-        proc read_more { MASTER library mysql_host mysql_port mysql_socket mysql_ssl_options mysql_user mysql_pass mysql_tpch_user mysql_tpch_pass interval old tce bm mysql_tpch_obcompat ob_tenant_name} {
+        proc read_more { MASTER library mysql_host mysql_port mysql_socket mysql_ssl_options mysql_user mysql_pass mysql_tpch_user mysql_tpch_pass interval old tce bm mysql_tpcc_obcompat tpcc_ob_tenant_name mysql_tpch_obcompat tpch_ob_tenant_name} {
             set timeout 0
             set iconflag 0
             if { $interval <= 0 } { set interval 10 } 
@@ -61,6 +61,8 @@ proc tcount_mysql {bm interval masterthread} {
                 set sqc "show global status where Variable_name = 'Com_commit' or Variable_name =  'Com_rollback'"
                 set tmp_mysql_user $mysql_user
                 set tmp_mysql_pass $mysql_pass
+                set is_oceanbase $mysql_tpcc_obcompat
+                set ob_tenant_name $tpcc_ob_tenant_name
                 set tval 60
             } else {
                 if {$mysql_tpch_obcompat eq "true"} {
@@ -70,6 +72,8 @@ proc tcount_mysql {bm interval masterthread} {
                 }                
                 set tmp_mysql_user $mysql_tpch_user
                 set tmp_mysql_pass $mysql_tpch_pass
+                set is_oceanbase $mysql_tpch_obcompat
+                set ob_tenant_name $tpch_ob_tenant_name
                 set tval 3600
             }
             set mplier [ expr {$tval / $interval} ]
@@ -87,7 +91,7 @@ proc tcount_mysql {bm interval masterthread} {
             } else {
                 namespace import tcountcommon::*
             }
-            set mysql_handler [ ConnectToMySQL $MASTER $mysql_host $mysql_port $mysql_socket $mysql_ssl_options $tmp_mysql_user $tmp_mysql_pass $mysql_tpch_obcompat $ob_tenant_name]
+            set mysql_handler [ ConnectToMySQL $MASTER $mysql_host $mysql_port $mysql_socket $mysql_ssl_options $tmp_mysql_user $tmp_mysql_pass $is_oceanbase $ob_tenant_name]
             #Enter loop until stop button pressed
             while { $timeout eq 0 } {
                 set timeout [ tsv::get application timeout ]
@@ -167,6 +171,9 @@ proc tcount_mysql {bm interval masterthread} {
     #Setup Transaction Counter Connection Variables
     upvar #0 configmysql configmysql
     setlocaltcountvars $configmysql 1
+    set mysql_tpcc_obcompat [ dict get $configmysql tpcc mysql_tpcc_obcompat ]
+    set tpcc_ob_tenant_name [ dict get $configmysql tpcc mysql_ob_tenant_name ]
+    set tpch_ob_tenant_name [ dict get $configmysql tpch mysql_ob_tenant_name ]
     #If the options menu has been run under the GUI mysql_ssl_options is set
     #If build is run under the GUI, CLI or WS mysql_ssl_options is not set
     #Set it now if it doesn't exist
@@ -176,5 +183,5 @@ proc tcount_mysql {bm interval masterthread} {
     catch {eval [ subst {thread::send $tc_threadID {lappend ::auto_path [zipfs root]app/lib}}]}
     catch {eval [ subst {thread::send $tc_threadID {::tcl::tm::path add [zipfs root]app/modules modules}}]}
     #Call Transaction Counter to start read_more loop
-    eval [ subst {thread::send -async $tc_threadID { read_more $masterthread $library $mysql_host $mysql_port $mysql_socket {$mysql_ssl_options} $mysql_user [ quotemeta $mysql_pass ] $mysql_tpch_user [ quotemeta $mysql_tpch_pass ] $interval $old tce $bm $mysql_tpch_obcompat $mysql_ob_tenant_name }}]
+    eval [ subst {thread::send -async $tc_threadID { read_more $masterthread $library $mysql_host $mysql_port $mysql_socket {$mysql_ssl_options} $mysql_user [ quotemeta $mysql_pass ] $mysql_tpch_user [ quotemeta $mysql_tpch_pass ] $interval $old tce $bm $mysql_tpcc_obcompat $tpcc_ob_tenant_name $mysql_tpch_obcompat $tpch_ob_tenant_name }}]
 } 

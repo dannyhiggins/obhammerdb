@@ -26,6 +26,9 @@
             <mysql_prepared>false</mysql_prepared>
             <mysql_history_pk>false</mysql_history_pk>
             <mysql_no_stored_procs>false</mysql_no_stored_procs>
+            <mysql_tpcc_obcompat>false</mysql_tpcc_obcompat>
+            <mysql_ob_tenant_name>tpcc</mysql_ob_tenant_name>
+            <mysql_ob_partition_num>1</mysql_ob_partition_num>
         </schema>
         <driver>
             <mysql_total_iterations>10000000</mysql_total_iterations>

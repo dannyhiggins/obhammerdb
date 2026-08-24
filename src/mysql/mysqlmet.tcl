@@ -1970,10 +1970,18 @@ namespace eval mysqlmet {
             set public(user) $mysql_user
             set public(user_pw) [ quotemeta $mysql_pass ]
             set public(tproc_db) $mysql_dbase
+            if { [ dict get $configmysql tpcc mysql_tpcc_obcompat ] eq "true" } {
+                set public(user) "$mysql_user@[ dict get $configmysql tpcc mysql_ob_tenant_name ]"
+                set public(socket) "null"
+            }
         } else {
             set public(user) $mysql_tpch_user
             set public(user_pw) [ quotemeta $mysql_tpch_pass ]
             set public(tproc_db) $mysql_tpch_dbase
+            if { $mysql_tpch_obcompat eq "true" } {
+                set public(user) "$mysql_tpch_user@[ dict get $configmysql tpch mysql_ob_tenant_name ]"
+                set public(socket) "null"
+            }
         }
 
         if { ! [ info exists dbmon_threadID ] } {

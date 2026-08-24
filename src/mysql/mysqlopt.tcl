@@ -85,13 +85,17 @@ proc countmysqlopts { bm } {
     set default_mysql_port $mysql_port
     if { $mysql_port eq $mysql_oceanbase_port } { set default_mysql_port 3306 } 
     variable myoptsfields 
+    if {![info exists mysql_tpcc_obcompat]} { set mysql_tpcc_obcompat "false" }
+    if {![info exists mysql_ob_tenant_name]} { set mysql_ob_tenant_name "tpcc" }
     if { $bm eq "TPC-C" } {
+        set mysql_tpcc_obcompat [ dict get $configmysql tpcc mysql_tpcc_obcompat ]
+        set mysql_ob_tenant_name [ dict get $configmysql tpcc mysql_ob_tenant_name ]
         if {![string match windows $::tcl_platform(platform)]} {
             set platform "lin"
-            set myoptsfields [ dict create connection {mysql_host {.countopt.c1.e1 get} mysql_port {.countopt.c1.e2 get} mysql_socket {.countopt.c1.e2a get} mysql_ssl_ca {.countopt.c1.e2d get} mysql_ssl_cert {.countopt.c1.e2e get} mysql_ssl_key {.countopt.c1.e2f get} mysql_ssl_cipher {.countopt.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath} tpcc {mysql_user {.countopt.c1.e3 get} mysql_pass {.countopt.c1.e4 get}} ]
+            set myoptsfields [ dict create connection {mysql_host {.countopt.c1.e1 get} mysql_port {.countopt.c1.e2 get} mysql_socket {.countopt.c1.e2a get} mysql_ssl_ca {.countopt.c1.e2d get} mysql_ssl_cert {.countopt.c1.e2e get} mysql_ssl_key {.countopt.c1.e2f get} mysql_ssl_cipher {.countopt.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath mysql_oceanbase_port $mysql_oceanbase_port} tpcc {mysql_user {.countopt.c1.e3 get} mysql_pass {.countopt.c1.e4 get} mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name} ]
         } else {
             set platform "win"
-            set myoptsfields [ dict create connection {mysql_host {.countopt.c1.e1 get} mysql_port {.countopt.c1.e2 get} mysql_socket {.countopt.c1.e2a get} mysql_ssl_ca {.countopt.c1.e2d get} mysql_ssl_cert {.countopt.c1.e2e get} mysql_ssl_key {.countopt.c1.e2f get} mysql_ssl_cipher {.countopt.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath}} tpcc {mysql_user {.countopt.c1.e3 get} mysql_pass {.countopt.c1.e4 get}} ]
+            set myoptsfields [ dict create connection {mysql_host {.countopt.c1.e1 get} mysql_port {.countopt.c1.e2 get} mysql_socket {.countopt.c1.e2a get} mysql_ssl_ca {.countopt.c1.e2d get} mysql_ssl_cert {.countopt.c1.e2e get} mysql_ssl_key {.countopt.c1.e2f get} mysql_ssl_cipher {.countopt.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath} mysql_oceanbase_port $mysql_oceanbase_port} tpcc {mysql_user {.countopt.c1.e3 get} mysql_pass {.countopt.c1.e4 get} mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name} ]
         }
     } else {
         if {![string match windows $::tcl_platform(platform)]} {
@@ -278,11 +282,13 @@ proc countmysqlopts { bm } {
 set Name $Parent.c1.e5a
     set Prompt $Parent.c1.p5a
     ttk::label $Prompt -text "Oceanbase Database Compatible :"
-    ttk::checkbutton $Name -text "" -variable mysql_tpch_obcompat -onvalue "true" -offvalue "false"
+    if { $bm eq "TPC-C" } { set obcompatvar mysql_tpcc_obcompat } else { set obcompatvar mysql_tpch_obcompat }
+    ttk::checkbutton $Name -text "" -variable $obcompatvar -onvalue "true" -offvalue "false"
     grid $Prompt -column 0 -row 14 -sticky e
     grid $Name -column 1 -row 14 -sticky w
     bind $Parent.c1.e5a <Button> {
-        if { $mysql_tpch_obcompat eq "true" } {
+        if { $bm eq "TPC-C" } { set oceanbase_enabled $mysql_tpcc_obcompat } else { set oceanbase_enabled $mysql_tpch_obcompat }
+        if { $oceanbase_enabled eq "true" } {
              set mysql_port $default_mysql_port
             .countopt.c1.e2b configure -state normal
             .countopt.c1.e5b configure -state disabled
@@ -306,7 +312,7 @@ set Name $Parent.c1.e5a
     ttk::entry $Name -width 30 -textvariable mysql_ob_tenant_name
     grid $Prompt -column 0 -row 14 -sticky e
     grid $Name -column 1 -row 14 -sticky ew
-    if {$mysql_tpch_obcompat == "false" } {
+    if { ($bm eq "TPC-C" && $mysql_tpcc_obcompat eq "false") || ($bm ne "TPC-C" && $mysql_tpch_obcompat eq "false") } {
         $Name configure -state disabled
     }
     grid $Prompt -column 0 -row 15 -sticky e
@@ -411,17 +417,20 @@ set Name $Parent.c1.e5a
 }
 
 proc configmysqltpcc {option} {
+    global default_mysql_port
     upvar #0 icons icons
     upvar #0 configmysql configmysql
     #set variables to values in dict
     setlocaltpccvars $configmysql
-    set tpccfields [ dict create tpcc {mysql_user {.tpc.c1.e3 get} mysql_pass {.tpc.c1.e4 get} mysql_dbase {.tpc.c1.e5 get} mysql_storage_engine {.tpc.f1.e6 get} mysql_total_iterations {.tpc.f1.e14 get} mysql_rampup {.tpc.f1.e17 get} mysql_duration {.tpc.f1.e18 get} mysql_async_client {.tpc.f1.e22 get} mysql_async_delay {.tpc.f1.e23 get} mysql_count_ware $mysql_count_ware mysql_num_vu $mysql_num_vu mysql_partition $mysql_partition mysql_driver $mysql_driver mysql_raiseerror $mysql_raiseerror mysql_keyandthink $mysql_keyandthink mysql_allwarehouse $mysql_allwarehouse mysql_timeprofile $mysql_timeprofile mysql_async_scale $mysql_async_scale mysql_async_verbose $mysql_async_verbose mysql_prepared $mysql_prepared mysql_no_stored_procs $mysql_no_stored_procs mysql_connect_pool $mysql_connect_pool mysql_history_pk $mysql_history_pk} ]
+    set default_mysql_port $mysql_port
+    if { $mysql_port eq $mysql_oceanbase_port } { set default_mysql_port 3306 }
+    set tpccfields [ dict create tpcc {mysql_user {.tpc.c1.e3 get} mysql_pass {.tpc.c1.e4 get} mysql_dbase {.tpc.c1.e5 get} mysql_storage_engine {.tpc.f1.e6 get} mysql_total_iterations {.tpc.f1.e14 get} mysql_rampup {.tpc.f1.e17 get} mysql_duration {.tpc.f1.e18 get} mysql_async_client {.tpc.f1.e22 get} mysql_async_delay {.tpc.f1.e23 get} mysql_count_ware $mysql_count_ware mysql_num_vu $mysql_num_vu mysql_partition $mysql_partition mysql_driver $mysql_driver mysql_raiseerror $mysql_raiseerror mysql_keyandthink $mysql_keyandthink mysql_allwarehouse $mysql_allwarehouse mysql_timeprofile $mysql_timeprofile mysql_async_scale $mysql_async_scale mysql_async_verbose $mysql_async_verbose mysql_prepared $mysql_prepared mysql_no_stored_procs $mysql_no_stored_procs mysql_connect_pool $mysql_connect_pool mysql_history_pk $mysql_history_pk mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name mysql_ob_partition_num $mysql_ob_partition_num} ]
     if {![string match windows $::tcl_platform(platform)]} {
         set platform "lin"
-        set mysqlconn [ dict create connection {mysql_host {.tpc.c1.e1 get} mysql_port {.tpc.c1.e2 get} mysql_socket {.tpc.c1.e2a get} mysql_ssl_ca {.tpc.c1.e2d get} mysql_ssl_cert {.tpc.c1.e2e get} mysql_ssl_key {.tpc.c1.e2f get} mysql_ssl_cipher {.tpc.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath} ]
+        set mysqlconn [ dict create connection {mysql_host {.tpc.c1.e1 get} mysql_port {.tpc.c1.e2 get} mysql_socket {.tpc.c1.e2a get} mysql_ssl_ca {.tpc.c1.e2d get} mysql_ssl_cert {.tpc.c1.e2e get} mysql_ssl_key {.tpc.c1.e2f get} mysql_ssl_cipher {.tpc.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath mysql_oceanbase_port $mysql_oceanbase_port} ]
     } else {
         set platform "win"
-        set mysqlconn [ dict create connection {mysql_host {.tpc.c1.e1 get} mysql_port {.tpc.c1.e2 get} mysql_socket {.tpc.c1.e2a get} mysql_ssl_ca {.tpc.c1.e2d get} mysql_ssl_cert {.tpc.c1.e2e get} mysql_ssl_key {.tpc.c1.e2f get} mysql_ssl_cipher {.tpc.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath}} ]
+        set mysqlconn [ dict create connection {mysql_host {.tpc.c1.e1 get} mysql_port {.tpc.c1.e2 get} mysql_socket {.tpc.c1.e2a get} mysql_ssl_ca {.tpc.c1.e2d get} mysql_ssl_cert {.tpc.c1.e2e get} mysql_ssl_key {.tpc.c1.e2f get} mysql_ssl_cipher {.tpc.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath} mysql_oceanbase_port $mysql_oceanbase_port} ]
     }
     variable myfields
     set myfields [ dict merge $mysqlconn $tpccfields ]
@@ -602,6 +611,46 @@ proc configmysqltpcc {option} {
     ttk::entry $Name -width 30 -textvariable mysql_dbase
     grid $Prompt -column 0 -row 14 -sticky e
     grid $Name -column 1 -row 14 -sticky ew
+    if { $option eq "all" || $option eq "build" } {
+        set Prompt $Parent.c1.p5a
+        ttk::label $Prompt -text "OceanBase Compatible :"
+        set Name $Parent.c1.e5a
+        ttk::checkbutton $Name -variable mysql_tpcc_obcompat -onvalue "true" -offvalue "false"
+        grid $Prompt -column 0 -row 15 -sticky e
+        grid $Name -column 1 -row 15 -sticky w
+        set Prompt $Parent.c1.p5b
+        ttk::label $Prompt -text "OceanBase Tenant Name :"
+        set Name $Parent.c1.e5b
+        ttk::entry $Name -width 30 -textvariable mysql_ob_tenant_name
+        grid $Prompt -column 0 -row 16 -sticky e
+        grid $Name -column 1 -row 16 -sticky ew
+        set Prompt $Parent.c1.p5c
+        ttk::label $Prompt -text "OceanBase Partitions :"
+        set Name $Parent.c1.e5c
+        ttk::entry $Name -width 30 -textvariable mysql_ob_partition_num
+        grid $Prompt -column 0 -row 17 -sticky e
+        grid $Name -column 1 -row 17 -sticky ew
+        if { $mysql_tpcc_obcompat eq "false" } {
+            .tpc.c1.e5b configure -state disabled
+            .tpc.c1.e5c configure -state disabled
+        }
+        bind .tpc.c1.e5a <Any-ButtonRelease> {
+            if { $mysql_tpcc_obcompat eq "true" } {
+                set mysql_port $mysql_oceanbase_port
+                set mysql_ssl "false"
+                .tpc.c1.e5b configure -state normal
+                .tpc.c1.e5c configure -state normal
+                .tpc.c1.e2a configure -state disabled
+                .tpc.c1.e2b configure -state disabled
+            } else {
+                set mysql_port $default_mysql_port
+                .tpc.c1.e5b configure -state disabled
+                .tpc.c1.e5c configure -state disabled
+                if { ![string match windows $::tcl_platform(platform)] } { .tpc.c1.e2a configure -state normal }
+                .tpc.c1.e2b configure -state normal
+            }
+        }
+    }
     if { $option eq "all" || $option eq "build" } {
         set Name $Parent.f1.e6
         set Prompt $Parent.f1.p6
@@ -1365,12 +1414,14 @@ proc metmysqlopts {} {
 
     variable myoptsfields
     if { $bm eq "TPC-C" } {
+        set mysql_tpcc_obcompat [ dict get $configmysql tpcc mysql_tpcc_obcompat ]
+        set mysql_ob_tenant_name [ dict get $configmysql tpcc mysql_ob_tenant_name ]
         if {![string match windows $::tcl_platform(platform)]} {
             set platform "lin"
-            set myoptsfields [ dict create connection {mysql_host {.metric.c1.e1 get} mysql_port {.metric.c1.e2 get} mysql_socket {.metric.c1.e2a get} mysql_ssl_ca {.metric.c1.e2d get} mysql_ssl_cert {.metric.c1.e2e get} mysql_ssl_key {.metric.c1.e2f get} mysql_ssl_cipher {.metric.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath} tpcc {mysql_user {.metric.c1.e3 get} mysql_pass {.metric.c1.e4 get}} ]
+            set myoptsfields [ dict create connection {mysql_host {.metric.c1.e1 get} mysql_port {.metric.c1.e2 get} mysql_socket {.metric.c1.e2a get} mysql_ssl_ca {.metric.c1.e2d get} mysql_ssl_cert {.metric.c1.e2e get} mysql_ssl_key {.metric.c1.e2f get} mysql_ssl_cipher {.metric.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_linux_capath $mysql_ssl_linux_capath mysql_oceanbase_port $mysql_oceanbase_port} tpcc {mysql_user {.metric.c1.e3 get} mysql_pass {.metric.c1.e4 get} mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name} ]
         } else {
             set platform "win"
-            set myoptsfields [ dict create connection {mysql_host {.metric.c1.e1 get} mysql_port {.metric.c1.e2 get} mysql_socket {.metric.c1.e2a get} mysql_ssl_ca {.metric.c1.e2d get} mysql_ssl_cert {.metric.c1.e2e get} mysql_ssl_key {.metric.c1.e2f get} mysql_ssl_cipher {.metric.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath}} tpcc {mysql_user {.metric.c1.e3 get} mysql_pass {.metric.c1.e4 get}} ]
+            set myoptsfields [ dict create connection {mysql_host {.metric.c1.e1 get} mysql_port {.metric.c1.e2 get} mysql_socket {.metric.c1.e2a get} mysql_ssl_ca {.metric.c1.e2d get} mysql_ssl_cert {.metric.c1.e2e get} mysql_ssl_key {.metric.c1.e2f get} mysql_ssl_cipher {.metric.c1.e2g get} mysql_ssl $mysql_ssl mysql_ssl_two_way $mysql_ssl_two_way mysql_ssl_windows_capath {$mysql_ssl_windows_capath} mysql_oceanbase_port $mysql_oceanbase_port} tpcc {mysql_user {.metric.c1.e3 get} mysql_pass {.metric.c1.e4 get} mysql_tpcc_obcompat $mysql_tpcc_obcompat mysql_ob_tenant_name $mysql_ob_tenant_name} ]
         }
     } else {
         if {![string match windows $::tcl_platform(platform)]} {

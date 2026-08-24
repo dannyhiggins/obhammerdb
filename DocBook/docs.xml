@@ -4951,6 +4951,27 @@ GO
                 have a primary key. This option creates the history table with
                 an invisible primary key at supported MySQL versions.</entry>
               </row>
+
+              <row>
+                <entry>OceanBase Compatible</entry>
+
+                <entry>Connect to an OceanBase MySQL-compatible tenant and
+                create an OceanBase-partitioned TPROC-C schema.</entry>
+              </row>
+
+              <row>
+                <entry>OceanBase Tenant Name</entry>
+
+                <entry>The OceanBase tenant appended to the MySQL user name
+                when creating, running, checking, or deleting the schema.</entry>
+              </row>
+
+              <row>
+                <entry>OceanBase Partitions</entry>
+
+                <entry>The number of key partitions used for the partitioned
+                OceanBase TPROC-C tables.</entry>
+              </row>
             </tbody>
           </tgroup>
         </table>
