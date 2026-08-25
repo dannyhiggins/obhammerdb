@@ -2299,13 +2299,13 @@ namespace eval mysqlmet {
         global public
         #puts "call callback_connect db_type:$db_type, handle:$handle"
         if { $handle == -1 } {
-            if { $db_type == "default" } {
+            if { $db_type == "default" || $db_type == "oceanbase" } {
                 set public(connected) -1
             } else {
                 set public(tproc_connected) -1
             }
         } else {
-            if { $db_type == "default" } {
+            if { $db_type == "default" || $db_type == "oceanbase" } {
                 set public(connected) 1
                 set public(handle) $handle
             } else {
