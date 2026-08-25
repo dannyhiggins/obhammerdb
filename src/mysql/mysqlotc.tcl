@@ -58,13 +58,19 @@ proc tcount_mysql {bm interval masterthread} {
             if { ![ info exists tcdata ] } { set tcdata {} }
             if { ![ info exists timedata ] } { set timedata {} }
             if { $bm eq "TPC-C" } {
-                set sqc "show global status where Variable_name = 'Com_commit' or Variable_name =  'Com_rollback'"
                 set tmp_mysql_user $mysql_user
                 set tmp_mysql_pass $mysql_pass
                 set is_oceanbase $mysql_tpcc_obcompat
                 set ob_tenant_name $tpcc_ob_tenant_name
+                if { $is_oceanbase eq "true" } {
+                    set sqc "select 'Transactions' as Variable_name, coalesce(sum(VALUE), 0) as Value from oceanbase.GV\$SYSSTAT where STAT_ID in (30007, 30009)"
+                } else {
+                    set sqc "show global status where Variable_name = 'Com_commit' or Variable_name = 'Com_rollback'"
+                }
                 set tval 60
             } else {
+                set is_oceanbase $mysql_tpch_obcompat
+                set ob_tenant_name $tpch_ob_tenant_name
                 if {$mysql_tpch_obcompat eq "true"} {
                     set sqc "select 'Queries' as Variable_name, count(*) as Value FROM oceanbase.GV\$OB_SQL_AUDIT where TENANT_NAME='$ob_tenant_name'"
                 } else {
@@ -72,8 +78,6 @@ proc tcount_mysql {bm interval masterthread} {
                 }                
                 set tmp_mysql_user $mysql_tpch_user
                 set tmp_mysql_pass $mysql_tpch_pass
-                set is_oceanbase $mysql_tpch_obcompat
-                set ob_tenant_name $tpch_ob_tenant_name
                 set tval 3600
             }
             set mplier [ expr {$tval / $interval} ]
@@ -104,8 +108,21 @@ proc tcount_mysql {bm interval masterthread} {
                     break
                 } else {
                     if { $bm eq "TPC-C" } {
-                        regexp {\{\{Com_commit\ ([0-9]+)\}\ \{Com_rollback\ ([0-9]+)\}\}} $handler_stat all com_comm com_roll
-                        set outc [ expr $com_comm + $com_roll ]
+                        if { $mysql_tpcc_obcompat eq "true" } {
+                            if { ![ regexp {\{\{Transactions\ ([0-9]+)\}\}} $handler_stat all transactions ] } {
+                                tsv::set application tc_errmsg "unexpected OceanBase transaction counter result: $handler_stat"
+                                eval [subst {thread::send $MASTER show_tc_errmsg}]
+                                break
+                            }
+                            set outc $transactions
+                        } else {
+                            if { ![ regexp {\{\{Com_commit\ ([0-9]+)\}\ \{Com_rollback\ ([0-9]+)\}\}} $handler_stat all com_comm com_roll ] } {
+                                tsv::set application tc_errmsg "unexpected MySQL transaction counter result: $handler_stat"
+                                eval [subst {thread::send $MASTER show_tc_errmsg}]
+                                break
+                            }
+                            set outc [ expr {$com_comm + $com_roll} ]
+                        }
                     } else {
                         if {$mysql_tpch_obcompat eq "true"} {
                             regexp {\{\{Queries\ ([0-9]+)\}\}} $handler_stat all queries show_stat 
