@@ -2589,10 +2589,16 @@ namespace eval mysqlmet {
         #puts "call $cur_proc $i"
         if { $public(run) == 1 } {
             if { [ lock public(thread_actv) $cur_proc:$i ] } {
-                if { [ catch {
+                if { $i eq "obsample" } {
+                    # Preserve the literal $ in the OceanBase GV$OB_SQL_AUDIT
+                    # view name; this statement has no HammerDB substitutions.
+                    set sql $public(sql,$i)
+                } elseif { [ catch {
                         eval set sql \"$public(sql,$i)\"
                     } err ] } {
-                    foreach sql [ array names public "sql,*" ] { ; }
+                    puts "call mon_execute error expanding $i: $err"
+                    unlock public(thread_actv) $cur_proc:$i
+                    return
                 }
                 set crsr "crsr,$i"
                 if { [ catch {
