@@ -447,17 +447,27 @@ proc CreateStoredProcs { mysql_handler } {
 proc PrepareOceanbase { host port socket ssl_options user password ob_tenant_name } {
     puts "PREPARING OCEANBASE"
     global mysqlstatus
+    set tenant_name $ob_tenant_name
+    set sys_user "$user@sys"
+    set cluster_separator [ string first "#" $ob_tenant_name ]
+    if { $cluster_separator >= 0 } {
+        set tenant_name [ string range $ob_tenant_name 0 [ expr {$cluster_separator - 1} ] ]
+        set cluster_name [ string range $ob_tenant_name [ expr {$cluster_separator + 1} ] end ]
+        if { $cluster_name ne "" } {
+            append sys_user "#$cluster_name"
+        }
+    }
     set connectstring "-host $host -port $port"
     foreach key [ dict keys $ssl_options ] {
         append connectstring " $key [ dict get $ssl_options $key ] "
     }
-    append connectstring " -user $user@sys -password $password"
+    append connectstring " -user $sys_user -password $password"
     if [catch {set ob_handler [eval "mysqlconnect [ dict get $connectstring ]"]} message] {
         error "OceanBase administrative connection to $host:$port failed: $message"
     }
     mysql::autocommit $ob_handler 0
     foreach statement [list \
-        "alter system set enable_sql_extension=True tenant=$ob_tenant_name" \
+        "alter system set enable_sql_extension=True tenant=$tenant_name" \
         "alter system set enable_perf_event=True"] {
         puts $statement
         mysqlexec $ob_handler $statement
