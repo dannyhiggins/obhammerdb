@@ -8969,13 +8969,24 @@ pgsentinel_ash.max_entries = 1000000</programlisting>
       database server:</para>
 
       <programlisting># ASH diagnostics
-performance_schema=OFF
-event_scheduler=OFF</programlisting>
+performance_schema=ON
+event_scheduler=ON</programlisting>
 
       <para>These options should be added to the MySQL or MariaDB server
       configuration file, for example my.cnf or my.ini depending on the
       operating system and installation method. Restart the database server
       after changing these settings.</para>
+
+      <para>OceanBase MySQL-compatible tenants do not implement the MySQL
+      performance_schema. When OceanBase Compatible is selected, HammerDB
+      instead reads completed requests from
+      oceanbase.GV$OB_SQL_AUDIT and maps OceanBase wait classes into the
+      existing metrics display. SQL Audit must be enabled and the benchmark
+      user must be able to query this view. The enable_sql_audit cluster
+      parameter and ob_enable_sql_audit tenant variable control collection.
+      Because SQL Audit contains completed executions rather than periodic
+      samples of currently active threads, the Active Sessions value shown
+      for OceanBase is an approximation based on audited executions.</para>
 
       <para>After the database has been started with the required settings,
       select the MySQL or MariaDB workload in HammerDB and open the Metrics

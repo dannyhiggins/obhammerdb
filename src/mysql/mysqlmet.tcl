@@ -1,5 +1,5 @@
 namespace eval mysqlmet {
-    namespace export create_metrics_screen display_tile display_only colors1 colors2 colors getcolor geteventcolor getlcolor generic_time cur_time secs_fetch days_fetch ash_init reset_ticks ashempty_fetch ashtime_fetch ses_tbl sql_tbl emptyStr stat_tbl plan_tbl evt_tbl createSesFrame createSqlFrame createevtFrame create_ash_cpu_line ash_bars ash_displayx ash_fetch ash_details ash_sqldetails_fetch ash_sqlsessions_fetch ash_sqltxt ashrpt_fetch ash_sqltxt_fetch ash_sqlstats_fetch ash_sqlplan_fetch ash_eventsqls_fetch ash_sqlevents_fetch sqlovertime_fetch sqlovertime ashsetup vectorsetup addtabs graphsetup outputsetup waitbuttons_setup sqlbuttons_setup cbc_fetch sqlio_fetch wait_analysis connect_to_mysql putsm mysql_dbmon_thread_init just_disconnect mysql_logon mysql_logoff ConnectToMySQL mysql_sql mysql_all callback_connect callback_set callback_fetch callback_err callback_mesg test_connect_mysql lock unlock cpucount_fetch mysql_HowManyProcessorsWindows mysql_HowManyProcessorsLinux get_cpucount version_fetch mon_init mon_loop mon_execute set_mysql_waits set_mysql_events get_event_type get_event_desc set_mysqlcursors init_publics mysql_post_kill_dbmon_cleanup mysqlmetrics
+    namespace export create_metrics_screen display_tile display_only colors1 colors2 colors getcolor geteventcolor getlcolor generic_time cur_time secs_fetch days_fetch ash_init reset_ticks ashempty_fetch ashtime_fetch ses_tbl sql_tbl emptyStr stat_tbl plan_tbl evt_tbl createSesFrame createSqlFrame createevtFrame create_ash_cpu_line ash_bars ash_displayx ash_fetch ash_details ash_sqldetails_fetch ash_sqlsessions_fetch ash_sqltxt ashrpt_fetch ash_sqltxt_fetch ash_sqlstats_fetch ash_sqlplan_fetch ash_eventsqls_fetch ash_sqlevents_fetch sqlovertime_fetch sqlovertime ashsetup vectorsetup addtabs graphsetup outputsetup waitbuttons_setup sqlbuttons_setup cbc_fetch sqlio_fetch wait_analysis connect_to_mysql putsm mysql_dbmon_thread_init just_disconnect mysql_logon mysql_logoff ConnectToMySQL mysql_sql mysql_exec mysql_all callback_connect callback_set callback_fetch callback_err callback_mesg test_connect_mysql lock unlock cpucount_fetch mysql_HowManyProcessorsWindows mysql_HowManyProcessorsLinux get_cpucount version_fetch mon_init mon_loop mon_execute set_mysql_waits set_mysql_events get_event_type get_event_desc set_mysqlcursors init_publics mysql_post_kill_dbmon_cleanup mysqlmetrics
 
     variable firstconnect "true"
 
@@ -336,6 +336,11 @@ namespace eval mysqlmet {
         #uncomment toreport how many rows
         #thread::send $parent "putsm \"Ash has $public(ashrowcount) rows...\""
         unlock public(thread_actv) $cur_proc
+    }
+
+    proc obsample_fetch { args } {
+        global public
+        unlock public(thread_actv) obsample_fetch
     }
 
     proc ashtime_fetch { args } {
@@ -1966,11 +1971,13 @@ namespace eval mysqlmet {
         set public(port) $mysql_port
         set public(socket) $mysql_socket
         set public(ssl_options) $mysql_ssl_options
+        set public(oceanbase) false
         if { $bm eq "TPC-C" } {
             set public(user) $mysql_user
             set public(user_pw) [ quotemeta $mysql_pass ]
             set public(tproc_db) $mysql_dbase
             if { [ dict get $configmysql tpcc mysql_tpcc_obcompat ] eq "true" } {
+                set public(oceanbase) true
                 set public(user) "$mysql_user@[ dict get $configmysql tpcc mysql_ob_tenant_name ]"
                 set public(socket) "null"
             }
@@ -1979,6 +1986,7 @@ namespace eval mysqlmet {
             set public(user_pw) [ quotemeta $mysql_tpch_pass ]
             set public(tproc_db) $mysql_tpch_dbase
             if { $mysql_tpch_obcompat eq "true" } {
+                set public(oceanbase) true
                 set public(user) "$mysql_tpch_user@[ dict get $configmysql tpch mysql_ob_tenant_name ]"
                 set public(socket) "null"
             }
@@ -1995,7 +2003,7 @@ namespace eval mysqlmet {
         }
 
         #Do logon in thread
-        set db_type "default"
+        if { $public(oceanbase) } { set db_type "oceanbase" } else { set db_type "default" }
         thread::send -async $dbmon_threadID "mysql_logon $public(parent) $public(host) $public(port) {$public(socket)} {$public(ssl_options)} $public(user) $public(user_pw) $public(tproc_db) $db_type"
 
         test_connect_mysql
@@ -2122,6 +2130,46 @@ namespace eval mysqlmet {
                         just_disconnect $parent
                         return
                     }
+                } elseif { $db_type == "oceanbase" } {
+                    if { [ catch {
+                            # OceanBase has no MySQL performance_schema.  SQL Audit is its
+                            # closest equivalent and already records completed requests.
+                            mysql::sel $handle "SELECT REQUEST_ID FROM oceanbase.GV\$OB_SQL_AUDIT LIMIT 1"
+                            mysql::exec $handle "CREATE DATABASE IF NOT EXISTS hammerdb_ash"
+                            mysql::exec $handle "CREATE TABLE IF NOT EXISTS hammerdb_ash.active_session_history (
+                                ash_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                ash_time DATETIME(6) NOT NULL,
+                                thread_id BIGINT,
+                                processlist_id BIGINT,
+                                user VARCHAR(128),
+                                host VARCHAR(261),
+                                db VARCHAR(128),
+                                command VARCHAR(128),
+                                state VARCHAR(64),
+                                wait_event_type VARCHAR(64),
+                                wait_event VARCHAR(128),
+                                sql_text LONGTEXT,
+                                digest_text LONGTEXT,
+                                digest VARCHAR(128),
+                                source_id VARCHAR(255),
+                                INDEX idx_ash_time (ash_time),
+                                INDEX idx_wait_event_type (wait_event_type),
+                                INDEX idx_digest (digest),
+                                UNIQUE KEY idx_source_id (source_id)
+                            )"
+                            # Upgrade a table created by an earlier HammerDB build.
+                            catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history ADD COLUMN source_id VARCHAR(255)" }
+                            catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history ADD UNIQUE KEY idx_source_id (source_id)" }
+                            catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY db VARCHAR(128)" }
+                            catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY command VARCHAR(128)" }
+                            catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY digest VARCHAR(128)" }
+                            mysql::exec $handle [ oceanbase_ash_sql ]
+                        } err ] } {
+                        catch { mysql::close $handle }
+                        thread::send -async $parent "::callback_err \"OceanBase SQL Audit metrics initialization failed: $err. Verify enable_sql_audit, ob_enable_sql_audit, and access to oceanbase.GV\\\$OB_SQL_AUDIT.\""
+                        just_disconnect $parent
+                        return
+                    }
                 }
 
                 thread::send -async $parent "::callback_connect $db_type $handle"
@@ -2168,6 +2216,37 @@ namespace eval mysqlmet {
                 thread::send  $parent " ::callback_mesg $cur_proc "
                 mysql::exec $handle $sql
                 thread::send $parent " ::callback_mesg $cursor parsed"
+            }
+
+            proc oceanbase_ash_sql {} {
+                return "INSERT IGNORE INTO hammerdb_ash.active_session_history
+                    (ash_time, thread_id, processlist_id, user, host, db, command,
+                     state, wait_event_type, wait_event, sql_text, digest_text, digest, source_id)
+                    SELECT USEC_TO_TIME(REQUEST_TIME), REQUEST_ID, SID, USER_NAME,
+                     CLIENT_IP, DB_NAME, STMT_TYPE, COALESCE(STATE, ''),
+                     CASE
+                       WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'USER_IO' THEN 'wait/io/table/oceanbase'
+                       WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'APPLICATION' THEN 'wait/lock/oceanbase'
+                       WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'CONCURRENCY' THEN 'wait/synch/mutex/oceanbase'
+                       WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'NETWORK' THEN 'wait/io/socket/oceanbase'
+                       WHEN COALESCE(EVENT, '') = '' THEN 'CPU'
+                       ELSE CONCAT('wait/oceanbase/', LOWER(COALESCE(WAIT_CLASS, 'other')))
+                     END,
+                     COALESCE(EVENT, 'CPU'), LEFT(QUERY_SQL, 4096),
+                     LEFT(QUERY_SQL, 4096), SQL_ID,
+                     CONCAT(SVR_IP, ':', SVR_PORT, ':', REQUEST_ID)
+                    FROM oceanbase.GV\$OB_SQL_AUDIT
+                    WHERE IS_INNER_SQL = 0
+                      AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL 2 HOUR) * 1000000)
+                      AND QUERY_SQL NOT LIKE '%hammerdb_ash%'"
+            }
+
+            proc mysql_exec { parent handle cursor sql fetch } {
+                if {[catch { mysql::exec $handle $sql } message]} {
+                    thread::send $parent "putsm \"OceanBase Metrics Query Failed, err:$message \""
+                }
+                tsv::set fetched $cursor ""
+                thread::send -async $parent "::callback_fetch $cursor $fetch"
             }
 
             proc mysql_all { parent handle cursor sql fetch } {
@@ -2293,6 +2372,9 @@ namespace eval mysqlmet {
         } else {
             if { $public(connected) == 1 } {
                 puts "Metrics Connected"
+                if { $public(oceanbase) } {
+                    puts "OceanBase Metrics using GV\$OB_SQL_AUDIT (audited executions; AAS is approximate)"
+                }
                 if { $firstconnect eq "true" } {
                     colors
                     init_publics
@@ -2488,6 +2570,7 @@ namespace eval mysqlmet {
                 if { $public(cursor,$i) == "slow" } { set slow "$slow $i" }
                 if { $public(cursor,$i) == "fast" } { set fast "$fast $i" }
             }
+            if { $public(oceanbase) } { mon_execute obsample }
             foreach i "secs $fast " { mon_execute $i }
             if { $public(slow_cur) >= $public(sleep,slow) } {
                 set public(slow_cur) [ expr  $public(slow_cur) - $public(sleep,slow) ]
@@ -2517,7 +2600,11 @@ namespace eval mysqlmet {
                         #if { $i == "ash_sqlplan" } {
                             #  thread::send -async $dbmon_threadID "mysql_all $public(parent) $public(tproc_handle) $crsr \"$sql\" $fetch"
                         #} else {
-                            thread::send -async $dbmon_threadID "mysql_all $public(parent) $public(handle) $crsr \"$sql\" $fetch"
+                            if { $i eq "obsample" } {
+                                thread::send -async $dbmon_threadID [ list mysql_exec $public(parent) $public(handle) $crsr $sql $fetch ]
+                            } else {
+                                thread::send -async $dbmon_threadID "mysql_all $public(parent) $public(handle) $crsr \"$sql\" $fetch"
+                            }
                         #}
                     } err ] } {
                     puts "call mon_execute error:$err"
@@ -2674,6 +2761,29 @@ namespace eval mysqlmet {
 
         set public(sql,cpucount) ""
 
+        if { $public(oceanbase) } {
+            set public(sql,obsample) "INSERT IGNORE INTO hammerdb_ash.active_session_history
+                (ash_time, thread_id, processlist_id, user, host, db, command,
+                 state, wait_event_type, wait_event, sql_text, digest_text, digest, source_id)
+                SELECT USEC_TO_TIME(REQUEST_TIME), REQUEST_ID, SID, USER_NAME,
+                 CLIENT_IP, DB_NAME, STMT_TYPE, COALESCE(STATE, ''),
+                 CASE
+                   WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'USER_IO' THEN 'wait/io/table/oceanbase'
+                   WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'APPLICATION' THEN 'wait/lock/oceanbase'
+                   WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'CONCURRENCY' THEN 'wait/synch/mutex/oceanbase'
+                   WHEN UPPER(COALESCE(WAIT_CLASS, '')) = 'NETWORK' THEN 'wait/io/socket/oceanbase'
+                   WHEN COALESCE(EVENT, '') = '' THEN 'CPU'
+                   ELSE CONCAT('wait/oceanbase/', LOWER(COALESCE(WAIT_CLASS, 'other')))
+                 END,
+                 COALESCE(EVENT, 'CPU'), LEFT(QUERY_SQL, 4096),
+                 LEFT(QUERY_SQL, 4096), SQL_ID,
+                 CONCAT(SVR_IP, ':', SVR_PORT, ':', REQUEST_ID)
+                FROM oceanbase.GV\$OB_SQL_AUDIT
+                WHERE IS_INNER_SQL = 0
+                  AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL 2 HOUR) * 1000000)
+                  AND QUERY_SQL NOT LIKE '%hammerdb_ash%'"
+        }
+
         set public(sql,ashempty) "SELECT count(*) FROM hammerdb_ash.active_session_history;"
 
         set public(sql,version) "SELECT version();"
@@ -2747,6 +2857,16 @@ namespace eval mysqlmet {
       0 as select_full_join, 0 as sort_rows, 0 as no_index_used
     FROM hammerdb_ash.active_session_history WHERE \$public(ash,sqlid) AND sql_text IS NOT NULL
     ) combined ORDER BY calls DESC LIMIT 1;"
+
+        if { $public(oceanbase) } {
+            # GV$OB_SQL_AUDIT rows are executions, so return the subset of the
+            # MySQL digest-statistics shape available in the compatibility table.
+            set public(sql,ash_sqlstats) "SELECT COUNT(*) as calls, 0 as total_exec_time,
+              0 as rows_affected, 0 as rows_sent, 0 as rows_examined,
+              0 as tmp_tables, 0 as tmp_disk_tables, 0 as select_scan,
+              0 as select_full_join, 0 as sort_rows, 0 as no_index_used
+              FROM hammerdb_ash.active_session_history WHERE \$public(ash,sqlid);"
+        }
 
         set public(sql,ash_eventsqls) "SELECT count(*) as total, sql_text, wait_event, command
     FROM hammerdb_ash.active_session_history WHERE \$public(ash,eventid) AND
