@@ -8984,9 +8984,10 @@ event_scheduler=ON</programlisting>
       existing metrics display. SQL Audit must be enabled and the benchmark
       user must be able to query this view. The enable_sql_audit cluster
       parameter and ob_enable_sql_audit tenant variable control collection.
-      Because SQL Audit contains completed executions rather than periodic
-      samples of currently active threads, the Active Sessions value shown
-      for OceanBase is an approximation based on audited executions.</para>
+      HammerDB selects one representative audited request for each session in
+      every 15-second interval. This bounds the monitoring overhead and gives
+      an active-session approximation without importing every completed
+      statement from a high-throughput workload.</para>
 
       <para>After the database has been started with the required settings,
       select the MySQL or MariaDB workload in HammerDB and open the Metrics

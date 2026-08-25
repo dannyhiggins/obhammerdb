@@ -2163,7 +2163,10 @@ namespace eval mysqlmet {
                             catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY db VARCHAR(128)" }
                             catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY command VARCHAR(128)" }
                             catch { mysql::exec $handle "ALTER TABLE hammerdb_ash.active_session_history MODIFY digest VARCHAR(128)" }
-                            mysql::exec $handle [ oceanbase_ash_sql ]
+                            # This is a generated cache. Older builds imported every audit
+                            # request and could leave millions of rows that stall the GUI.
+                            mysql::exec $handle "TRUNCATE TABLE hammerdb_ash.active_session_history"
+                            mysql::exec $handle [ oceanbase_ash_sql 5 MINUTE ]
                         } err ] } {
                         catch { mysql::close $handle }
                         thread::send -async $parent "::callback_err \"OceanBase SQL Audit metrics initialization failed: $err. Verify enable_sql_audit, ob_enable_sql_audit, and access to oceanbase.GV\\\$OB_SQL_AUDIT.\""
@@ -2218,7 +2221,7 @@ namespace eval mysqlmet {
                 thread::send $parent " ::callback_mesg $cursor parsed"
             }
 
-            proc oceanbase_ash_sql {} {
+            proc oceanbase_ash_sql { lookback unit } {
                 return "INSERT IGNORE INTO hammerdb_ash.active_session_history
                     (ash_time, thread_id, processlist_id, user, host, db, command,
                      state, wait_event_type, wait_event, sql_text, digest_text, digest, source_id)
@@ -2235,10 +2238,18 @@ namespace eval mysqlmet {
                      COALESCE(EVENT, 'CPU'), LEFT(QUERY_SQL, 4096),
                      LEFT(QUERY_SQL, 4096), SQL_ID,
                      CONCAT(SVR_IP, ':', SVR_PORT, ':', REQUEST_ID)
-                    FROM oceanbase.GV\$OB_SQL_AUDIT
-                    WHERE IS_INNER_SQL = 0
-                      AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL 2 HOUR) * 1000000)
-                      AND QUERY_SQL NOT LIKE '%hammerdb_ash%'"
+                    FROM (
+                      SELECT audit.*,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY SID, FLOOR(REQUEST_TIME / 15000000)
+                          ORDER BY REQUEST_TIME DESC
+                        ) AS hdb_sample_row
+                      FROM oceanbase.GV\$OB_SQL_AUDIT audit
+                      WHERE IS_INNER_SQL = 0
+                        AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL $lookback $unit) * 1000000)
+                        AND QUERY_SQL NOT LIKE '%hammerdb_ash%'
+                    ) sampled
+                    WHERE hdb_sample_row = 1"
             }
 
             proc mysql_exec { parent handle cursor sql fetch } {
@@ -2373,7 +2384,7 @@ namespace eval mysqlmet {
             if { $public(connected) == 1 } {
                 puts "Metrics Connected"
                 if { $public(oceanbase) } {
-                    puts "OceanBase Metrics using GV\$OB_SQL_AUDIT (audited executions; AAS is approximate)"
+                    puts "OceanBase Metrics using sampled sessions from GV\$OB_SQL_AUDIT"
                 }
                 if { $firstconnect eq "true" } {
                     colors
@@ -2784,10 +2795,18 @@ namespace eval mysqlmet {
                  COALESCE(EVENT, 'CPU'), LEFT(QUERY_SQL, 4096),
                  LEFT(QUERY_SQL, 4096), SQL_ID,
                  CONCAT(SVR_IP, ':', SVR_PORT, ':', REQUEST_ID)
-                FROM oceanbase.GV\$OB_SQL_AUDIT
-                WHERE IS_INNER_SQL = 0
-                  AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL 2 HOUR) * 1000000)
-                  AND QUERY_SQL NOT LIKE '%hammerdb_ash%'"
+                FROM (
+                  SELECT audit.*,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY SID, FLOOR(REQUEST_TIME / 15000000)
+                      ORDER BY REQUEST_TIME DESC
+                    ) AS hdb_sample_row
+                  FROM oceanbase.GV\$OB_SQL_AUDIT audit
+                  WHERE IS_INNER_SQL = 0
+                    AND REQUEST_TIME >= (UNIX_TIMESTAMP(NOW() - INTERVAL 30 SECOND) * 1000000)
+                    AND QUERY_SQL NOT LIKE '%hammerdb_ash%'
+                ) sampled
+                WHERE hdb_sample_row = 1"
         }
 
         set public(sql,ashempty) "SELECT count(*) FROM hammerdb_ash.active_session_history;"
